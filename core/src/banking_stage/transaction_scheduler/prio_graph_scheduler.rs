@@ -595,39 +595,26 @@ mod tests {
             tx_infos.into_iter().enumerate()
         {
             let id = TransactionId::new(index as u64);
-<<<<<<< HEAD
             let transaction =
                 prioritized_tranfers(from_keypair.borrow(), to_pubkeys, lamports, priority);
-=======
-            let transaction = prioritized_tranfers(
-                from_keypair.borrow(),
-                to_pubkeys,
-                lamports,
-                compute_unit_price,
-            );
             let packet = Arc::new(
                 ImmutableDeserializedPacket::new(
                     Packet::from_data(None, transaction.to_versioned_transaction()).unwrap(),
                 )
                 .unwrap(),
             );
->>>>>>> fb35f1912e (scheduler forward packets (#898))
             let transaction_ttl = SanitizedTransactionTTL {
                 transaction,
                 max_age_slot: Slot::MAX,
             };
             const TEST_TRANSACTION_COST: u64 = 5000;
-<<<<<<< HEAD
-            container.insert_new_transaction(id, transaction_ttl, priority, TEST_TRANSACTION_COST);
-=======
             container.insert_new_transaction(
                 id,
                 transaction_ttl,
                 packet,
-                compute_unit_price,
+                priority,
                 TEST_TRANSACTION_COST,
             );
->>>>>>> fb35f1912e (scheduler forward packets (#898))
         }
 
         container
