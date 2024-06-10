@@ -282,16 +282,7 @@ mod tests {
             max_age_slot: Slot::MAX,
         };
         const TEST_TRANSACTION_COST: u64 = 5000;
-<<<<<<< HEAD
-        TransactionState::new(transaction_ttl, priority, TEST_TRANSACTION_COST)
-=======
-        TransactionState::new(
-            transaction_ttl,
-            packet,
-            compute_unit_price,
-            TEST_TRANSACTION_COST,
-        )
->>>>>>> fb35f1912e (scheduler forward packets (#898))
+        TransactionState::new(transaction_ttl, packet, priority, TEST_TRANSACTION_COST)
     }
 
     #[test]
