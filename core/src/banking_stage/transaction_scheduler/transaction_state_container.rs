@@ -3,15 +3,11 @@ use {
         transaction_priority_id::TransactionPriorityId,
         transaction_state::{SanitizedTransactionTTL, TransactionState},
     },
-<<<<<<< HEAD
-    crate::banking_stage::scheduler_messages::TransactionId,
-=======
     crate::banking_stage::{
         immutable_deserialized_packet::ImmutableDeserializedPacket,
         scheduler_messages::TransactionId,
     },
     itertools::MinMaxResult,
->>>>>>> fb35f1912e (scheduler forward packets (#898))
     min_max_heap::MinMaxHeap,
     std::{collections::HashMap, sync::Arc},
 };
