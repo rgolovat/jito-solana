@@ -7,7 +7,6 @@ use {
         immutable_deserialized_packet::ImmutableDeserializedPacket,
         scheduler_messages::TransactionId,
     },
-    itertools::MinMaxResult,
     min_max_heap::MinMaxHeap,
     std::{collections::HashMap, sync::Arc},
 };
