@@ -25,17 +25,12 @@ use {
     solana_program_runtime::compute_budget_processor::process_compute_budget_instructions,
     solana_runtime::{bank::Bank, bank_forks::BankForks},
     solana_sdk::{
-<<<<<<< HEAD
-        clock::MAX_PROCESSING_AGE,
-        feature_set::include_loaded_accounts_data_size_in_fee_calculation, fee::FeeBudgetLimits,
-        saturating_add_assign, timing::AtomicInterval, transaction::SanitizedTransaction,
-=======
-        self,
         clock::{FORWARD_TRANSACTIONS_TO_LEADER_AT_SLOT_OFFSET, MAX_PROCESSING_AGE},
+        feature_set::include_loaded_accounts_data_size_in_fee_calculation,
         fee::FeeBudgetLimits,
         saturating_add_assign,
+        timing::AtomicInterval,
         transaction::SanitizedTransaction,
->>>>>>> fb35f1912e (scheduler forward packets (#898))
     },
     std::{
         sync::{Arc, RwLock},
@@ -163,25 +158,12 @@ impl SchedulerController {
                 saturating_add_assign!(self.timing_metrics.schedule_time_us, schedule_time_us);
             }
             BufferedPacketsDecision::Forward => {
-<<<<<<< HEAD
-                let (_, clear_time_us) = measure_us!(self.clear_container());
-                saturating_add_assign!(self.timing_metrics.clear_time_us, clear_time_us);
-            }
-            BufferedPacketsDecision::ForwardAndHold => {
-                let (_, clean_time_us) = measure_us!(self.clean_queue());
-                saturating_add_assign!(self.timing_metrics.clean_time_us, clean_time_us);
-=======
                 let (_, forward_time_us) = measure_us!(self.forward_packets(false));
-                self.timing_metrics.update(|timing_metrics| {
-                    saturating_add_assign!(timing_metrics.forward_time_us, forward_time_us);
-                });
+                saturating_add_assign!(self.timing_metrics.forward_time_us, forward_time_us);
             }
             BufferedPacketsDecision::ForwardAndHold => {
                 let (_, forward_time_us) = measure_us!(self.forward_packets(true));
-                self.timing_metrics.update(|timing_metrics| {
-                    saturating_add_assign!(timing_metrics.forward_time_us, forward_time_us);
-                });
->>>>>>> fb35f1912e (scheduler forward packets (#898))
+                saturating_add_assign!(self.timing_metrics.forward_time_us, forward_time_us);
             }
             BufferedPacketsDecision::Hold => {}
         }
@@ -421,31 +403,11 @@ impl SchedulerController {
         match received_packet_results {
             Ok(receive_packet_results) => {
                 let num_received_packets = receive_packet_results.deserialized_packets.len();
-<<<<<<< HEAD
                 saturating_add_assign!(self.count_metrics.num_received, num_received_packets);
-                if should_buffer {
-                    let (_, buffer_time_us) = measure_us!(
-                        self.buffer_packets(receive_packet_results.deserialized_packets)
-                    );
-                    saturating_add_assign!(self.timing_metrics.buffer_time_us, buffer_time_us);
-                } else {
-                    saturating_add_assign!(
-                        self.count_metrics.num_dropped_on_receive,
-                        num_received_packets
-                    );
-                }
-=======
-
-                self.count_metrics.update(|count_metrics| {
-                    saturating_add_assign!(count_metrics.num_received, num_received_packets);
-                });
 
                 let (_, buffer_time_us) =
                     measure_us!(self.buffer_packets(receive_packet_results.deserialized_packets));
-                self.timing_metrics.update(|timing_metrics| {
-                    saturating_add_assign!(timing_metrics.buffer_time_us, buffer_time_us);
-                });
->>>>>>> fb35f1912e (scheduler forward packets (#898))
+                saturating_add_assign!(self.timing_metrics.buffer_time_us, buffer_time_us);
             }
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return false,
@@ -477,18 +439,9 @@ impl SchedulerController {
             chunk
                 .iter()
                 .filter_map(|packet| {
-<<<<<<< HEAD
-                    packet.build_sanitized_transaction(feature_set, vote_only, bank.as_ref())
-=======
                     packet
-                        .build_sanitized_transaction(
-                            feature_set,
-                            vote_only,
-                            bank.as_ref(),
-                            bank.get_reserved_account_keys(),
-                        )
+                        .build_sanitized_transaction(feature_set, vote_only, bank.as_ref())
                         .map(|tx| (packet.clone(), tx))
->>>>>>> fb35f1912e (scheduler forward packets (#898))
                 })
                 .inspect(|_| saturating_add_assign!(post_sanitization_count, 1))
                 .filter(|(_packet, tx)| {
@@ -518,13 +471,10 @@ impl SchedulerController {
             let post_lock_validation_count = transactions.len();
 
             let mut post_transaction_check_count: usize = 0;
-<<<<<<< HEAD
-            for ((transaction, fee_budget_limits), _) in transactions
-=======
+
             let mut num_dropped_on_capacity: usize = 0;
             let mut num_buffered: usize = 0;
             for (((packet, transaction), fee_budget_limits), _) in arc_packets
->>>>>>> fb35f1912e (scheduler forward packets (#898))
                 .into_iter()
                 .zip(transactions)
                 .zip(fee_budget_limits_vec)
