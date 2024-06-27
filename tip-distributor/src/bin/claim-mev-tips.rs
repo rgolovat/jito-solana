@@ -56,6 +56,10 @@ struct Args {
     /// The price to pay for priority fee
     #[arg(long, env, default_value_t = 1)]
     micro_lamports: u64,
+
+    /// Optional API key for the block engine
+    #[arg(long, env)]
+    block_engine_api_key: Option<String>,
 }
 
 async fn start_mev_claim_process(
@@ -65,6 +69,7 @@ async fn start_mev_claim_process(
     signer: Arc<Keypair>,
     max_loop_duration: Duration,
     micro_lamports: u64,
+    api_key: Option<String>,
 ) -> Result<(), ClaimMevError> {
     let start = Instant::now();
 
@@ -75,6 +80,7 @@ async fn start_mev_claim_process(
         signer,
         max_loop_duration,
         micro_lamports,
+        api_key,
     )
     .await
     {
@@ -107,6 +113,7 @@ async fn start_rent_claim(
     should_reclaim_tdas: bool,
     micro_lamports: u64,
     epoch: u64,
+    api_key: Option<String>,
 ) -> Result<(), ClaimMevError> {
     let start = Instant::now();
     match reclaim_rent(
@@ -116,6 +123,7 @@ async fn start_rent_claim(
         max_loop_duration,
         should_reclaim_tdas,
         micro_lamports,
+        api_key,
     )
     .await
     {
@@ -169,6 +177,7 @@ async fn main() -> Result<(), ClaimMevError> {
         keypair.clone(),
         max_loop_duration,
         args.micro_lamports,
+        args.block_engine_api_key.clone(),
     )));
     if args.should_reclaim_rent {
         futs.push(tokio::spawn(start_rent_claim(
@@ -179,6 +188,7 @@ async fn main() -> Result<(), ClaimMevError> {
             args.should_reclaim_tdas,
             args.micro_lamports,
             epoch,
+            args.block_engine_api_key.clone(),
         )));
     }
     let results = join_all(futs).await;

@@ -7755,6 +7755,7 @@ name = "solana-tip-distributor"
 version = "1.18.22"
 dependencies = [
  "anchor-lang",
+ "bincode",
  "clap 4.3.21",
  "crossbeam-channel",
  "env_logger",
@@ -7767,6 +7768,7 @@ dependencies = [
  "log",
  "num-traits",
  "rand 0.8.5",
+ "reqwest",
  "serde",
  "serde_json",
  "solana-accounts-db",

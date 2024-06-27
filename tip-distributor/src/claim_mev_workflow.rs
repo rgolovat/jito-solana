@@ -1,10 +1,10 @@
+use solana_sdk::compute_budget::ComputeBudgetInstruction;
 use {
     crate::{send_until_blockhash_expires, GeneratedMerkleTreeCollection},
     anchor_lang::{AccountDeserialize, InstructionData, ToAccountMetas},
     itertools::Itertools,
     jito_tip_distribution::state::{ClaimStatus, Config, TipDistributionAccount},
     log::{error, info, warn},
-    rand::{prelude::SliceRandom, thread_rng},
     solana_client::nonblocking::rpc_client::RpcClient,
     solana_metrics::datapoint_info,
     solana_program::{
@@ -15,7 +15,6 @@ use {
     solana_sdk::{
         account::Account,
         commitment_config::CommitmentConfig,
-        compute_budget::ComputeBudgetInstruction,
         instruction::Instruction,
         pubkey::Pubkey,
         signature::{Keypair, Signer},
@@ -145,6 +144,7 @@ pub async fn claim_mev_tips(
     keypair: Arc<Keypair>,
     max_loop_duration: Duration,
     micro_lamports: u64,
+    api_key: Option<String>,
 ) -> Result<(), ClaimMevError> {
     let rpc_client = RpcClient::new_with_timeout_and_commitment(
         rpc_url,
@@ -153,8 +153,9 @@ pub async fn claim_mev_tips(
     );
 
     let start = Instant::now();
+
     while start.elapsed() <= max_loop_duration {
-        let mut all_claim_transactions = get_claim_transactions_for_valid_unclaimed(
+        let all_claim_transactions = get_claim_transactions_for_valid_unclaimed(
             &rpc_client,
             merkle_trees,
             tip_distribution_program_id,
@@ -172,23 +173,37 @@ pub async fn claim_mev_tips(
             return Ok(());
         }
 
-        all_claim_transactions.shuffle(&mut thread_rng());
-        let transactions: Vec<_> = all_claim_transactions.into_iter().take(10_000).collect();
+        // small chunks because send_bundle is slow.. need to debug why, but if send too many
+        // here then the blockhash can expire
+        for transactions in all_claim_transactions.chunks(2_000) {
+            let transactions: Vec<_> = transactions.iter().cloned().collect();
+            // only check balance for the ones we need to currently send since reclaim rent running in parallel
+            if let Some((start_balance, desired_balance, sol_to_deposit)) =
+                is_sufficient_balance(&keypair.pubkey(), &rpc_client, transactions.len() as u64)
+                    .await
+            {
+                return Err(ClaimMevError::InsufficientBalance {
+                    desired_balance,
+                    payer: keypair.pubkey(),
+                    start_balance,
+                    sol_to_deposit,
+                });
+            }
 
-        // only check balance for the ones we need to currently send since reclaim rent running in parallel
-        if let Some((start_balance, desired_balance, sol_to_deposit)) =
-            is_sufficient_balance(&keypair.pubkey(), &rpc_client, transactions.len() as u64).await
-        {
-            return Err(ClaimMevError::InsufficientBalance {
-                desired_balance,
-                payer: keypair.pubkey(),
-                start_balance,
-                sol_to_deposit,
-            });
+            let blockhash = rpc_client.get_latest_blockhash().await?;
+            if let Err(e) = send_until_blockhash_expires(
+                &rpc_client,
+                transactions,
+                blockhash,
+                &keypair,
+                &api_key,
+            )
+            .await
+            {
+                error!("send_until_blockhash_expires failed: {:?}", e);
+                continue;
+            }
         }
-
-        let blockhash = rpc_client.get_latest_blockhash().await?;
-        let _ = send_until_blockhash_expires(&rpc_client, transactions, blockhash, &keypair).await;
     }
 
     let transactions = get_claim_transactions_for_valid_unclaimed(
@@ -261,7 +276,7 @@ fn build_mev_claim_transactions(
     tdas: HashMap<Pubkey, Account>,
     claimants: HashMap<Pubkey, Account>,
     claim_status: HashMap<Pubkey, Account>,
-    micro_lamports: u64,
+    _micro_lamports: u64,
     payer_pubkey: Pubkey,
 ) -> Vec<Transaction> {
     let tip_distribution_accounts: HashMap<Pubkey, TipDistributionAccount> = tdas
@@ -298,6 +313,7 @@ fn build_mev_claim_transactions(
         Pubkey::find_program_address(&[Config::SEED], &tip_distribution_program_id).0;
 
     let mut instructions = Vec::with_capacity(claimants.len());
+
     for tree in &merkle_trees.generated_merkle_trees {
         if tree.max_total_claim == 0 {
             continue;
@@ -346,12 +362,17 @@ fn build_mev_claim_transactions(
         }
     }
 
-    // TODO (LB): see if we can do >1 claim here
     let transactions: Vec<Transaction> = instructions
         .into_iter()
         .map(|claim_ix| {
-            let priority_fee_ix = ComputeBudgetInstruction::set_compute_unit_price(micro_lamports);
-            Transaction::new_with_payer(&[priority_fee_ix, claim_ix], Some(&payer_pubkey))
+            Transaction::new_with_payer(
+                &[
+                    // helps get txs into block easier since default is 400k CUs
+                    ComputeBudgetInstruction::set_compute_unit_limit(40_000),
+                    claim_ix,
+                ],
+                Some(&payer_pubkey),
+            )
         })
         .collect();
 
