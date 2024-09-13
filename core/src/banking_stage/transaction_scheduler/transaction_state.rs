@@ -58,8 +58,8 @@ impl TransactionState {
         priority: u64,
         cost: u64,
     ) -> Self {
-        let should_forward = !packet.original_packet().meta().forwarded()
-            && packet.original_packet().meta().is_from_staked_node();
+        let packet_meta = packet.original_packet().meta();
+        let should_forward = !packet_meta.forwarded() && packet_meta.is_from_staked_node();
         Self::Unprocessed {
             transaction_ttl,
             packet,
