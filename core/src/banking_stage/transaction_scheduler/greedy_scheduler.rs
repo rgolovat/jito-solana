@@ -39,7 +39,7 @@ impl GreedyScheduler {
             account_locks: ThreadAwareAccountLocks::new(num_threads),
             consume_work_senders,
             finished_consume_work_receiver,
-            look_ahead_window_size: 256,
+            //look_ahead_window_size: 256,
         }
     }
 
@@ -164,9 +164,9 @@ impl GreedyScheduler {
                     }
                 }
 
-                if num_scanned >= MAX_TRANSACTIONS_SCANNED_PER_SCHEDULING_PASS {
-                    break;
-                }
+                // if num_scanned >=  100_000 {
+                //     break;
+                // }
             }
         }
 
