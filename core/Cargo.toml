@@ -116,6 +116,9 @@ tokio = { workspace = true, features = ["full"] }
 tonic = { workspace = true }
 trees = { workspace = true }
 
+# hook
+laminar = { version = "0.5.0", features = ["env_logger"] }
+
 [dev-dependencies]
 agave-reserved-account-keys = { workspace = true }
 fs_extra = { workspace = true }

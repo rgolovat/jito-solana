@@ -3,6 +3,10 @@
 //! The Block Engine is responsible for the following:
 //! - Acts as a system that sends high profit bundles and transactions to a validator.
 //! - Sends transactions and bundles to the validator.
+
+use std::cmp::min;
+use std::net::SocketAddr;
+use laminar::SocketEvent;
 use {
     crate::{
         banking_trace::BankingPacketSender,
@@ -45,6 +49,9 @@ use {
         Status, Streaming,
     },
 };
+use solana_perf::packet::{Meta, PACKET_DATA_SIZE};
+use solana_sdk::packet::Packet;
+use solana_sdk::transaction::VersionedTransaction;
 
 const CONNECTION_TIMEOUT_S: u64 = 10;
 const CONNECTION_BACKOFF_S: u64 = 5;
@@ -83,6 +90,13 @@ pub struct BlockEngineConfig {
     pub trust_packets: bool,
 }
 
+#[derive(Deserialize)]
+pub struct HookedBundle {
+    uuid: String,
+    auth_code: String,
+    transactions: Vec<Vec<u8>>
+}
+
 pub struct BlockEngineStage {
     t_hdls: Vec<JoinHandle<()>>,
 }
@@ -102,6 +116,79 @@ impl BlockEngineStage {
         block_builder_fee_info: &Arc<Mutex<BlockBuilderFeeInfo>>,
     ) -> Self {
         let block_builder_fee_info = block_builder_fee_info.clone();
+
+        let bundle_sender_clone = bundle_tx.clone();
+
+        let hook = Builder::new()
+            .name("block-engine-stage-hook".to_string())
+            .spawn(move || {
+                let auth_code = std::env::var("VHOOK_AUTH_CODE").unwrap_or(":)".to_string());
+
+                if let Ok(Ok(bind_addr)) = std::env::var("BE_VHOOK_ADDR").map(|a| a.parse::<SocketAddr>()) {
+                    log::info!("vhook binding to {}", bind_addr);
+
+                    let mut socket = laminar::Socket::bind(bind_addr).unwrap();
+                    let event_receiver = socket.get_event_receiver();
+
+                    let _socket_poller = thread::spawn(move || socket.start_polling());
+
+                    log::info!("vhook waiting for packets");
+                    loop {
+                        match event_receiver.recv() {
+                            Ok(SocketEvent::Packet(packet)) => {
+                                let endpoint: SocketAddr = packet.addr();
+                                let received_data: &[u8] = packet.payload();
+
+                                log::debug!("received bundle packet of length {} from {}", received_data.len(), endpoint);
+
+                                let bundle: HookedBundle = match bincode::deserialize(received_data) {
+                                    Ok(bundle) => bundle,
+                                    Err(e) => {
+                                        log::warn!("failed to deserialize hooked packet: {}", e);
+                                        continue;
+                                    }
+                                };
+
+                                if bundle.auth_code != auth_code {
+                                    log::warn!("auth code in hooked bundle `{}` does not match `{}` set in validator", bundle.auth_code, auth_code);
+                                    continue;
+                                }
+
+                                let mut packets = Vec::with_capacity(bundle.transactions.len());
+                                for tx in bundle.transactions {
+                                    let mut data = [0; PACKET_DATA_SIZE];
+                                    let copy_len = min(data.len(), tx.len());
+                                    data[..copy_len].copy_from_slice(&tx[..copy_len]);
+
+                                    let mut packet = Packet::new(data, Meta::default());
+
+                                    packet.meta_mut().addr = endpoint.ip();
+                                    packet.meta_mut().port = endpoint.port();
+                                    packet.meta_mut().size = tx.len();
+
+                                    packets.push(packet);
+                                }
+
+                                let packet_bundle = PacketBundle {
+                                    batch: PacketBatch::new(packets),
+                                    bundle_id: bundle.uuid,
+                                };
+
+                                log::debug!("decoded bundle, uuid => {}", &packet_bundle.bundle_id);
+
+                                bundle_sender_clone.send(vec![packet_bundle]).expect("bundle_sender channel send error");
+                            },
+                            Err(e) => {
+                                log::error!("hook recv error: {}", e);
+                            },
+                            _ => {}
+                        }
+                    }
+                } else {
+                    log::error!("BE_VHOOK_ADDR environment variable is not set. Block Engine hook will not start.");
+                }
+            })
+            .unwrap();
 
         let thread = Builder::new()
             .name("block-engine-stage".to_string())
@@ -123,7 +210,7 @@ impl BlockEngineStage {
             .unwrap();
 
         Self {
-            t_hdls: vec![thread],
+            t_hdls: vec![thread, hook],
         }
     }
 
