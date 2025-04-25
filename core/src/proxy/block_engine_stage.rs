@@ -5,8 +5,10 @@
 //! - Sends transactions and bundles to the validator.
 
 use std::cmp::min;
-use std::net::SocketAddr;
-use laminar::SocketEvent;
+use std::fmt::{Display, Formatter};
+use std::io::Read;
+use std::net::{SocketAddr, TcpListener};
+
 use {
     crate::{
         banking_trace::BankingPacketSender,
@@ -97,6 +99,22 @@ pub struct HookedBundle {
     transactions: Vec<Vec<u8>>
 }
 
+impl Display for HookedBundle {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let txs = self.transactions.iter().map(|tx| {
+            if let Ok(tx) = bincode::deserialize::<VersionedTransaction>(&tx) {
+                Some(tx)
+            } else {
+                None
+            }
+        })
+            .filter_map(|tx| tx)
+            .collect::<Vec<_>>();
+
+        write!(f, "{}: {} => {:?}", self.uuid, self.auth_code, txs)
+    }
+}
+
 pub struct BlockEngineStage {
     t_hdls: Vec<JoinHandle<()>>,
 }
@@ -127,61 +145,83 @@ impl BlockEngineStage {
                 if let Ok(Ok(bind_addr)) = std::env::var("BE_VHOOK_ADDR").map(|a| a.parse::<SocketAddr>()) {
                     log::info!("vhook binding to {}", bind_addr);
 
-                    let mut socket = laminar::Socket::bind(bind_addr).unwrap();
-                    let event_receiver = socket.get_event_receiver();
-
-                    let _socket_poller = thread::spawn(move || socket.start_polling());
+                    let socket = TcpListener::bind(bind_addr).unwrap();
 
                     log::info!("vhook waiting for packets");
+
                     loop {
-                        match event_receiver.recv() {
-                            Ok(SocketEvent::Packet(packet)) => {
-                                let endpoint: SocketAddr = packet.addr();
-                                let received_data: &[u8] = packet.payload();
+                        let auth_code = auth_code.clone();
 
-                                log::debug!("received bundle packet of length {} from {}", received_data.len(), endpoint);
+                        if let Ok((mut stream, remote_addr)) = socket.accept() {
+                            log::info!("accepting vhook connection from remote addr: {}", remote_addr);
 
-                                let bundle: HookedBundle = match bincode::deserialize(received_data) {
-                                    Ok(bundle) => bundle,
-                                    Err(e) => {
-                                        log::warn!("failed to deserialize hooked packet: {}", e);
-                                        continue;
+                            stream.set_nodelay(true).unwrap();
+
+                            let bundle_sender_clone = bundle_sender_clone.clone();
+
+                            let _ = Builder::new()
+                                .name(format!("vhook-bundle-tcp-receiver-{}", remote_addr))
+                                .spawn(move || {
+                                    loop {
+                                        let mut msg_len = [0u8; 2];
+                                        if let Err(e) = stream.read_exact(&mut msg_len) {
+                                            log::error!("failed to read message length from vhook stream: {}", e);
+                                            break;
+                                        }
+
+                                        let msg_len = u16::from_le_bytes(msg_len);
+
+                                        let mut msg_bytes = vec![0u8; msg_len as usize];
+                                        if let Err(e) = stream.read_exact(&mut msg_bytes) {
+                                            log::error!("failed to read message from vhook stream: {}", e);
+                                            break;
+                                        }
+
+                                        log::debug!("received bundle packet of length {} from {}", msg_bytes.len(), remote_addr);
+
+                                        let bundle: HookedBundle = match bincode::deserialize(&msg_bytes) {
+                                            Ok(bundle) => bundle,
+                                            Err(e) => {
+                                                log::warn!("failed to deserialize hooked packet: {}", e);
+                                                continue;
+                                            }
+                                        };
+
+                                        if bundle.auth_code != auth_code {
+                                            log::warn!("auth code in hooked bundle `{}` does not match `{}` set in validator", bundle.auth_code, auth_code);
+                                            continue;
+                                        }
+
+                                        log::trace!("full authenticated bundle: {}", &bundle);
+
+                                        let mut packets = Vec::with_capacity(bundle.transactions.len());
+                                        for tx in bundle.transactions {
+                                            let mut data = [0; PACKET_DATA_SIZE];
+                                            let copy_len = min(data.len(), tx.len());
+                                            data[..copy_len].copy_from_slice(&tx[..copy_len]);
+
+                                            let mut packet = Packet::new(data, Meta::default());
+
+                                            packet.meta_mut().addr = remote_addr.ip();
+                                            packet.meta_mut().port = remote_addr.port();
+                                            packet.meta_mut().size = tx.len();
+
+                                            packets.push(packet);
+                                        }
+
+                                        let packet_bundle = PacketBundle {
+                                            batch: PacketBatch::new(packets),
+                                            bundle_id: bundle.uuid,
+                                        };
+
+                                        log::debug!("decoded bundle, uuid => {}", &packet_bundle.bundle_id);
+                                        log::info!("bundle uuid => {}", &packet_bundle.bundle_id);
+
+
+                                        bundle_sender_clone.send(vec![packet_bundle]).expect("bundle_sender channel send error");
                                     }
-                                };
-
-                                if bundle.auth_code != auth_code {
-                                    log::warn!("auth code in hooked bundle `{}` does not match `{}` set in validator", bundle.auth_code, auth_code);
-                                    continue;
-                                }
-
-                                let mut packets = Vec::with_capacity(bundle.transactions.len());
-                                for tx in bundle.transactions {
-                                    let mut data = [0; PACKET_DATA_SIZE];
-                                    let copy_len = min(data.len(), tx.len());
-                                    data[..copy_len].copy_from_slice(&tx[..copy_len]);
-
-                                    let mut packet = Packet::new(data, Meta::default());
-
-                                    packet.meta_mut().addr = endpoint.ip();
-                                    packet.meta_mut().port = endpoint.port();
-                                    packet.meta_mut().size = tx.len();
-
-                                    packets.push(packet);
-                                }
-
-                                let packet_bundle = PacketBundle {
-                                    batch: PacketBatch::new(packets),
-                                    bundle_id: bundle.uuid,
-                                };
-
-                                log::debug!("decoded bundle, uuid => {}", &packet_bundle.bundle_id);
-
-                                bundle_sender_clone.send(vec![packet_bundle]).expect("bundle_sender channel send error");
-                            },
-                            Err(e) => {
-                                log::error!("hook recv error: {}", e);
-                            },
-                            _ => {}
+                                })
+                                .unwrap();
                         }
                     }
                 } else {

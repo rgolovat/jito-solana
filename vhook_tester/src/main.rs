@@ -1,5 +1,7 @@
+use std::io::Write;
+use std::net::{SocketAddr, TcpStream};
 use std::thread;
-use laminar::Packet;
+use std::time::Instant;
 use serde::Serialize;
 use solana_sdk::transaction::VersionedTransaction;
 
@@ -10,17 +12,13 @@ struct HookedBundle {
     transactions: Vec<Vec<u8>>
 }
 
+const AMOUNT: usize = 10000;
+
 fn main() -> anyhow::Result<()> {
-    let mut socket = laminar::Socket::bind("0.0.0.0:0")?;
+    let mut socket = TcpStream::connect("127.0.0.1:5105")?;
+    socket.set_nodelay(true)?;
 
-
-    let dest = "127.0.0.1:5105".parse()?;
-
-
-    let packet_sender = socket.get_packet_sender();
-
-    // Starts the socket, which will start a poll mechanism to receive and send messages.
-    let _thread = thread::spawn(move || socket.start_polling());
+    let dest: SocketAddr = "127.0.0.1:5105".parse()?;
 
 
     let vtx = VersionedTransaction::default();
@@ -31,12 +29,19 @@ fn main() -> anyhow::Result<()> {
     println!("sending packet");
 
     let bytes = bincode::serialize(&bundle)?;
+    let len = bytes.len() as u16;
+    let len_bytes = len.to_le_bytes();
 
     println!("size: {}", bytes.len());
 
-    packet_sender.send(Packet::reliable_unordered(dest, bytes))?;
+    let start = Instant::now();
+    for _ in 0..AMOUNT {
+        socket.write_all(&[len_bytes.as_slice(), &bytes].concat())?;
+    }
+    let end = Instant::now();
 
-    println!("packet sent, waiting 5sec to flush");
+
+    println!("{} pkts sent in {:?}", AMOUNT, end.duration_since(start));
 
     thread::sleep(std::time::Duration::from_secs(5));
 
