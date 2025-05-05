@@ -206,6 +206,7 @@ impl BundleStage {
         bundle_account_locker: BundleAccountLocker,
         block_builder_fee_info: &Arc<Mutex<BlockBuilderFeeInfo>>,
         prioritization_fee_cache: &Arc<PrioritizationFeeCache>,
+        bundle_result_broadcaster: tokio::sync::broadcast::Sender<Vec<u8>>,
     ) -> Self {
         Self::start_bundle_thread(
             cluster_info,
@@ -220,6 +221,7 @@ impl BundleStage {
             MAX_BUNDLE_RETRY_DURATION,
             block_builder_fee_info,
             prioritization_fee_cache,
+            bundle_result_broadcaster
         )
     }
 
@@ -241,6 +243,7 @@ impl BundleStage {
         max_bundle_retry_duration: Duration,
         block_builder_fee_info: &Arc<Mutex<BlockBuilderFeeInfo>>,
         prioritization_fee_cache: &Arc<PrioritizationFeeCache>,
+        bundle_result_broadcaster: tokio::sync::broadcast::Sender<Vec<u8>>,
     ) -> Self {
         const BUNDLE_STAGE_ID: u32 = 10_000;
         let poh_recorder = poh_recorder.clone();
@@ -267,6 +270,7 @@ impl BundleStage {
             block_builder_fee_info.clone(),
             max_bundle_retry_duration,
             cluster_info,
+            bundle_result_broadcaster
         );
 
         let bundle_thread = Builder::new()

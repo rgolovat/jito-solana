@@ -1,7 +1,9 @@
 //! The `tpu` module implements the Transaction Processing Unit, a
 //! multi-stage transaction processing pipeline in software.
 
+use crate::vhook_server::VHookServer;
 pub use solana_sdk::net::DEFAULT_TPU_COALESCE;
+use std::thread::Builder;
 // allow multiple connections for NAT and any open/close overlap
 #[deprecated(
     since = "2.2.0",
@@ -111,6 +113,7 @@ pub struct Tpu {
     block_engine_stage: BlockEngineStage,
     fetch_stage_manager: FetchStageManager,
     bundle_stage: BundleStage,
+    vhook_server_hdl: thread::JoinHandle<()>
 }
 
 impl Tpu {
@@ -280,6 +283,50 @@ impl Tpu {
             block_builder_commission: 0,
         }));
 
+        // vhook init
+        let vhook_auth_code = std::env::var("VHOOK_AUTH_CODE").unwrap_or(":)".to_string());
+        let vhook_bind_addr = std::env::var("BE_VHOOK_ADDR")
+            .map(|a| a.parse::<SocketAddr>())
+            .unwrap()
+            .unwrap();
+
+        const BUNDLE_RESULT_CHANNEL_SIZE: usize = u16::MAX as usize * 64;
+        const INBOUND_VHOOK_BUNDLE_CHANNEL_SIZE: usize = u16::MAX as usize;
+
+        let (bundle_result_broadcaster, _) =
+            tokio::sync::broadcast::channel(BUNDLE_RESULT_CHANNEL_SIZE);
+        let (vhook_bundle_sender, vhook_bundle_receiver) =
+            crossbeam_channel::bounded(INBOUND_VHOOK_BUNDLE_CHANNEL_SIZE);
+
+        let vhook = VHookServer::new(
+            vhook_auth_code.clone(),
+            bundle_result_broadcaster.clone(),
+            vhook_bundle_sender,
+        );
+
+        // build new tokio runtime and run vhook grpc server in there
+        let mut rt = tokio::runtime::Builder::new_multi_thread();
+        rt.enable_all();
+        if let Ok(Ok(worker_amt)) = std::env::var("VHOOK_TOKIO_RT_WORKERS").map(|x| x.parse()) {
+            rt.worker_threads(worker_amt);
+        }
+
+        let rt = rt.build().unwrap();
+
+        // vhook grpc thread
+        let vhook_server_hdl = Builder::new()
+            .name("vhook-grpc-server".to_string())
+            .spawn(move || {
+                rt.block_on(async {
+                    tonic::transport::Server::builder()
+                        .add_service(vhook.to_service())
+                        .serve(vhook_bind_addr)
+                        .await
+                        .expect("vhook grpc service failed");
+                });
+            })
+            .unwrap();
+
         let (bundle_sender, bundle_receiver) = unbounded();
         let block_engine_stage = BlockEngineStage::new(
             block_engine_config,
@@ -289,6 +336,8 @@ impl Tpu {
             non_vote_sender.clone(),
             exit.clone(),
             &block_builder_fee_info,
+            vhook_bundle_receiver,
+            vhook_auth_code,
         );
 
         let (heartbeat_tx, heartbeat_rx) = unbounded();
@@ -378,6 +427,7 @@ impl Tpu {
             bundle_account_locker,
             &block_builder_fee_info,
             prioritization_fee_cache,
+            bundle_result_broadcaster,
         );
 
         let (entry_receiver, tpu_entry_notifier) =
@@ -425,6 +475,7 @@ impl Tpu {
                 relayer_stage,
                 fetch_stage_manager,
                 bundle_stage,
+                vhook_server_hdl
             },
             vec![key_updater, forwards_key_updater, vote_streamer_key_updater],
         )
@@ -445,6 +496,7 @@ impl Tpu {
             self.relayer_stage.join(),
             self.block_engine_stage.join(),
             self.fetch_stage_manager.join(),
+            self.vhook_server_hdl.join(),
         ];
         let broadcast_result = self.broadcast_stage.join();
         for result in results {

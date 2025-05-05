@@ -6,8 +6,6 @@
 
 use std::cmp::min;
 use std::fmt::{Display, Formatter};
-use std::io::Read;
-use std::net::{SocketAddr, TcpListener};
 
 use {
     crate::{
@@ -132,103 +130,52 @@ impl BlockEngineStage {
         banking_packet_sender: BankingPacketSender,
         exit: Arc<AtomicBool>,
         block_builder_fee_info: &Arc<Mutex<BlockBuilderFeeInfo>>,
+        vhook_bundles: crossbeam_channel::Receiver<HookedBundle>,
+        vhook_auth_code: String
     ) -> Self {
         let block_builder_fee_info = block_builder_fee_info.clone();
 
         let bundle_sender_clone = bundle_tx.clone();
-
         let hook = Builder::new()
             .name("block-engine-stage-hook".to_string())
             .spawn(move || {
-                let auth_code = std::env::var("VHOOK_AUTH_CODE").unwrap_or(":)".to_string());
-
-                if let Ok(Ok(bind_addr)) = std::env::var("BE_VHOOK_ADDR").map(|a| a.parse::<SocketAddr>()) {
-                    log::info!("vhook binding to {}", bind_addr);
-
-                    let socket = TcpListener::bind(bind_addr).unwrap();
-
-                    log::info!("vhook waiting for packets");
-
-                    loop {
-                        let auth_code = auth_code.clone();
-
-                        if let Ok((mut stream, remote_addr)) = socket.accept() {
-                            log::info!("accepting vhook connection from remote addr: {}", remote_addr);
-
-                            stream.set_nodelay(true).unwrap();
-
-                            let bundle_sender_clone = bundle_sender_clone.clone();
-
-                            let _ = Builder::new()
-                                .name(format!("vhook-bundle-tcp-receiver-{}", remote_addr))
-                                .spawn(move || {
-                                    loop {
-                                        let mut msg_len = [0u8; 2];
-                                        if let Err(e) = stream.read_exact(&mut msg_len) {
-                                            log::error!("failed to read message length from vhook stream: {}", e);
-                                            break;
-                                        }
-
-                                        let msg_len = u16::from_le_bytes(msg_len);
-
-                                        let mut msg_bytes = vec![0u8; msg_len as usize];
-                                        if let Err(e) = stream.read_exact(&mut msg_bytes) {
-                                            log::error!("failed to read message from vhook stream: {}", e);
-                                            break;
-                                        }
-
-                                        log::debug!("received bundle packet of length {} from {}", msg_bytes.len(), remote_addr);
-
-                                        let bundle: HookedBundle = match bincode::deserialize(&msg_bytes) {
-                                            Ok(bundle) => bundle,
-                                            Err(e) => {
-                                                log::warn!("failed to deserialize hooked packet: {}", e);
-                                                continue;
-                                            }
-                                        };
-
-                                        if bundle.auth_code != auth_code {
-                                            log::warn!("auth code in hooked bundle `{}` does not match `{}` set in validator", bundle.auth_code, auth_code);
-                                            continue;
-                                        }
-
-                                        log::trace!("full authenticated bundle: {}", &bundle);
-
-                                        let mut packets = Vec::with_capacity(bundle.transactions.len());
-                                        for tx in bundle.transactions {
-                                            let mut data = [0; PACKET_DATA_SIZE];
-                                            let copy_len = min(data.len(), tx.len());
-                                            data[..copy_len].copy_from_slice(&tx[..copy_len]);
-
-                                            let mut packet = Packet::new(data, Meta::default());
-
-                                            packet.meta_mut().addr = remote_addr.ip();
-                                            packet.meta_mut().port = remote_addr.port();
-                                            packet.meta_mut().size = tx.len();
-
-                                            packets.push(packet);
-                                        }
-
-                                        let packet_bundle = PacketBundle {
-                                            batch: PacketBatch::new(packets),
-                                            bundle_id: bundle.uuid,
-                                        };
-
-                                        log::debug!("decoded bundle, uuid => {}", &packet_bundle.bundle_id);
-                                        log::info!("bundle uuid => {}", &packet_bundle.bundle_id);
-
-
-                                        bundle_sender_clone.send(vec![packet_bundle]).expect("bundle_sender channel send error");
-                                    }
-                                })
-                                .unwrap();
-                        }
+                while let Ok(bundle) = vhook_bundles.recv() {
+                    if bundle.auth_code != vhook_auth_code {
+                        log::warn!("auth code in hooked bundle `{}` does not match `{}` set in validator", bundle.auth_code, vhook_auth_code);
+                        continue;
                     }
-                } else {
-                    log::error!("BE_VHOOK_ADDR environment variable is not set. Block Engine hook will not start.");
+
+                    log::trace!("full authenticated bundle: {}", &bundle);
+
+                    let mut packets = Vec::with_capacity(bundle.transactions.len());
+                    for tx in bundle.transactions {
+                        let mut data = [0; PACKET_DATA_SIZE];
+                        let copy_len = min(data.len(), tx.len());
+                        data[..copy_len].copy_from_slice(&tx[..copy_len]);
+
+                        let mut packet = Packet::new(data, Meta::default());
+
+                        packet.meta_mut().addr = "192.168.88.57".parse().unwrap();
+                        packet.meta_mut().port = 48733;
+                        packet.meta_mut().size = tx.len();
+
+                        packets.push(packet);
+                    }
+
+                    let packet_bundle = PacketBundle {
+                        batch: PacketBatch::new(packets),
+                        bundle_id: bundle.uuid,
+                    };
+
+                    log::debug!("decoded bundle, uuid => {}", &packet_bundle.bundle_id);
+                    log::info!("bundle uuid => {}", &packet_bundle.bundle_id);
+
+
+                    bundle_sender_clone.send(vec![packet_bundle]).expect("bundle_sender channel send error");
                 }
             })
             .unwrap();
+
 
         let thread = Builder::new()
             .name("block-engine-stage".to_string())
