@@ -41,6 +41,8 @@ use {
         time::{Duration, Instant},
     },
 };
+use mev_relayer_protos::vhook::VHookBundleStatus;
+use solana_rpc::rpc::utils::bundle_error_to_rpc_error;
 
 type ReserveBundleBlockspaceResult<'a> = BundleExecutionResult<(
     Vec<transaction::Result<TransactionCost<'a, RuntimeTransaction<SanitizedTransaction>>>>,
@@ -75,6 +77,7 @@ pub struct BundleConsumer {
     max_bundle_retry_duration: Duration,
 
     cluster_info: Arc<ClusterInfo>,
+    bundle_result_broadcaster: tokio::sync::broadcast::Sender<Vec<u8>>,
 }
 
 impl BundleConsumer {
@@ -89,6 +92,7 @@ impl BundleConsumer {
         block_builder_fee_info: Arc<Mutex<BlockBuilderFeeInfo>>,
         max_bundle_retry_duration: Duration,
         cluster_info: Arc<ClusterInfo>,
+        bundle_result_broadcaster: tokio::sync::broadcast::Sender<Vec<u8>>,
     ) -> Self {
         let blacklisted_accounts = HashSet::from_iter([tip_manager.tip_payment_program_id()]);
         Self {
@@ -104,6 +108,7 @@ impl BundleConsumer {
             block_builder_fee_info,
             max_bundle_retry_duration,
             cluster_info,
+            bundle_result_broadcaster
         }
     }
 
@@ -149,6 +154,7 @@ impl BundleConsumer {
                     bundles,
                     bank_start,
                     bundle_stage_leader_metrics,
+                    &self.bundle_result_broadcaster
                 )
             },
         );
@@ -177,6 +183,7 @@ impl BundleConsumer {
         bundles: &[(ImmutableDeserializedBundle, SanitizedBundle)],
         bank_start: &BankStart,
         bundle_stage_leader_metrics: &mut BundleStageLeaderMetrics,
+        bundle_result_broadcaster: &tokio::sync::broadcast::Sender<Vec<u8>>,
     ) -> Vec<Result<(), BundleExecutionError>> {
         // BundleAccountLocker holds RW locks for ALL accounts in ALL transactions within a single bundle.
         // By pre-locking bundles before they're ready to be processed, it will prevent BankingStage from
@@ -186,8 +193,11 @@ impl BundleConsumer {
         let (locked_bundle_results, locked_bundles_elapsed_us) = measure_us!(bundles
             .iter()
             .map(|(_, sanitized_bundle)| {
-                bundle_account_locker
-                    .prepare_locked_bundle(sanitized_bundle, &bank_start.working_bank)
+                (
+                    bundle_account_locker
+                        .prepare_locked_bundle(sanitized_bundle, &bank_start.working_bank),
+                    sanitized_bundle.bundle_id.clone()
+                )
             })
             .collect::<Vec<_>>());
         bundle_stage_leader_metrics
@@ -197,7 +207,7 @@ impl BundleConsumer {
         let (execution_results, execute_locked_bundles_elapsed_us) =
             measure_us!(locked_bundle_results
                 .into_iter()
-                .map(|r| match r {
+                .map(|(r, bundle_id)| match r {
                     Ok(locked_bundle) => {
                         let (r, measure) = measure_us!(Self::process_bundle(
                             bundle_account_locker,
@@ -217,10 +227,11 @@ impl BundleConsumer {
                         bundle_stage_leader_metrics
                             .leader_slot_metrics_tracker()
                             .increment_process_packets_transactions_us(measure);
-                        r
+
+                        (r, bundle_id)
                     }
                     Err(_) => {
-                        Err(BundleExecutionError::LockError)
+                        (Err(BundleExecutionError::LockError), bundle_id)
                     }
                 })
                 .collect::<Vec<_>>());
@@ -228,13 +239,31 @@ impl BundleConsumer {
         bundle_stage_leader_metrics
             .bundle_stage_metrics_tracker()
             .increment_execute_locked_bundles_elapsed_us(execute_locked_bundles_elapsed_us);
-        execution_results.iter().for_each(|result| {
+        execution_results.iter().for_each(|(result, bundle_id)| {
             bundle_stage_leader_metrics
                 .bundle_stage_metrics_tracker()
                 .increment_bundle_execution_result(result);
+
+            log::info!(target: "vhook", "executed bundle with id {}", &bundle_id);
+
+            let mut error = None;
+            if let Err(e) = result {
+                let rpc_err = bundle_error_to_rpc_error(e);
+                error = Some(bincode::serialize(&rpc_err).unwrap());
+            }
+
+            let status = VHookBundleStatus {
+                bundle_id: bundle_id.clone(),
+                executed_at: mev_relayer_protos::get_unix_epoch(),
+                serialized_error: error,
+            };
+
+            let serialized_status = bincode::serialize(&status).unwrap();
+
+            let _ = bundle_result_broadcaster.send(serialized_status);
         });
 
-        execution_results
+        execution_results.into_iter().map(|r| r.0).collect()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1008,6 +1037,8 @@ mod tests {
             SocketAddrSpace::new(true),
         ));
 
+        let (sender, _) = tokio::sync::broadcast::channel(1);
+
         let mut consumer = BundleConsumer::new(
             committer,
             recorder,
@@ -1018,6 +1049,7 @@ mod tests {
             block_builder_info,
             Duration::from_secs(10),
             cluster_info,
+            sender
         );
 
         let bank_start = poh_recorder.read().unwrap().bank_start().unwrap();
@@ -1147,6 +1179,8 @@ mod tests {
             SocketAddrSpace::new(true),
         ));
 
+        let (sender, _) = tokio::sync::broadcast::channel(1);
+
         let mut consumer = BundleConsumer::new(
             committer,
             recorder,
@@ -1157,6 +1191,7 @@ mod tests {
             block_builder_info,
             Duration::from_secs(10),
             cluster_info.clone(),
+            sender
         );
 
         let bank_start = poh_recorder.read().unwrap().bank_start().unwrap();
