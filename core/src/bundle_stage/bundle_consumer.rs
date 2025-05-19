@@ -248,7 +248,7 @@ impl BundleConsumer {
 
             let mut error = None;
             if let Err(e) = result {
-                let rpc_err = bundle_error_to_rpc_error(e);
+                let rpc_err = bundle_error_to_rpc_error(e.clone());
                 error = Some(bincode::serialize(&rpc_err).unwrap());
             }
 

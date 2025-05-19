@@ -4,6 +4,9 @@
 use crate::vhook_server::VHookServer;
 pub use solana_sdk::net::DEFAULT_TPU_COALESCE;
 use std::thread::Builder;
+
+const DEFAULT_CAPTURED_BD_SEND_DELAY_MS: u64 = 80;
+
 // allow multiple connections for NAT and any open/close overlap
 #[deprecated(
     since = "2.2.0",
@@ -295,12 +298,17 @@ impl Tpu {
 
         let (bundle_result_broadcaster, _) =
             tokio::sync::broadcast::channel(BUNDLE_RESULT_CHANNEL_SIZE);
+
+        let (captured_bundle_bd, _) =
+            tokio::sync::broadcast::channel(BUNDLE_RESULT_CHANNEL_SIZE);
+
         let (vhook_bundle_sender, vhook_bundle_receiver) =
             crossbeam_channel::bounded(INBOUND_VHOOK_BUNDLE_CHANNEL_SIZE);
 
         let vhook = VHookServer::new(
             vhook_auth_code.clone(),
             bundle_result_broadcaster.clone(),
+            captured_bundle_bd.clone(),
             vhook_bundle_sender,
         );
 
@@ -327,6 +335,12 @@ impl Tpu {
             })
             .unwrap();
 
+        let captured_bd_send_delay = std::env::var("CAPTURED_BD_SEND_DELAY_MS")
+            .map(|x| x.parse::<u64>().unwrap())
+            .unwrap_or(DEFAULT_CAPTURED_BD_SEND_DELAY_MS);
+
+        info!("captured_bd_send_delay: {captured_bd_send_delay}");
+
         let (bundle_sender, bundle_receiver) = unbounded();
         let block_engine_stage = BlockEngineStage::new(
             block_engine_config,
@@ -338,6 +352,8 @@ impl Tpu {
             &block_builder_fee_info,
             vhook_bundle_receiver,
             vhook_auth_code,
+            captured_bundle_bd,
+            Duration::from_millis(captured_bd_send_delay)
         );
 
         let (heartbeat_tx, heartbeat_rx) = unbounded();

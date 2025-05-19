@@ -3508,6 +3508,63 @@ pub mod utils {
         std::str::FromStr,
     };
 
+    pub fn bundle_error_to_rpc_error(
+        bundle_execution_error: BundleExecutionError,
+    ) -> RpcBundleExecutionError {
+        match bundle_execution_error {
+            BundleExecutionError::BankProcessingTimeLimitReached => {
+                RpcBundleExecutionError::BankProcessingTimeLimitReached
+            }
+            BundleExecutionError::ExceedsCostModel => RpcBundleExecutionError::ExceedsCostModel,
+            BundleExecutionError::TransactionFailure(load_and_execute_bundle_error) => {
+                match load_and_execute_bundle_error {
+                    LoadAndExecuteBundleError::ProcessingTimeExceeded(_) => {
+                        RpcBundleExecutionError::BundleExecutionTimeout
+                    }
+                    LoadAndExecuteBundleError::LockError {
+                        signature,
+                        transaction_error,
+                    } => RpcBundleExecutionError::TransactionFailure(
+                        signature,
+                        transaction_error.to_string(),
+                    ),
+                    LoadAndExecuteBundleError::TransactionError {
+                        signature,
+                        execution_result,
+                    } => match *execution_result {
+                        Ok(processed_transaction) => {
+                            match processed_transaction.executed_transaction() {
+                                None => RpcBundleExecutionError::TransactionFailure(
+                                    signature,
+                                    processed_transaction.status().unwrap_err().to_string(),
+                                ),
+                                Some(tx) => {
+                                    let err_msg = if let Err(e) = &tx.execution_details.status {
+                                        e.to_string()
+                                    } else {
+                                        "Unknown error".to_string()
+                                    };
+                                    RpcBundleExecutionError::TransactionFailure(signature, err_msg)
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            RpcBundleExecutionError::TransactionFailure(signature, e.to_string())
+                        }
+                    },
+                    LoadAndExecuteBundleError::InvalidPreOrPostAccounts => {
+                        RpcBundleExecutionError::InvalidPreOrPostAccounts
+                    }
+                }
+            }
+            BundleExecutionError::LockError => RpcBundleExecutionError::BundleLockError,
+            BundleExecutionError::PohRecordError(e) => {
+                RpcBundleExecutionError::PohRecordError(e.to_string())
+            }
+            BundleExecutionError::TipError(e) => RpcBundleExecutionError::TipError(e.to_string()),
+        }
+    }
+
     /// Encodes the accounts, returns an error if any of the accounts failed to encode
     /// The outer error can be set by error parsing, Ok(None) means there wasn't any accounts in the parameter
     fn try_encode_accounts(
