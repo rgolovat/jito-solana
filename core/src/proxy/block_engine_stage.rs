@@ -4,9 +4,10 @@
 //! - Acts as a system that sends high profit bundles and transactions to a validator.
 //! - Sends transactions and bundles to the validator.
 
+use std::cell::LazyCell;
 use std::cmp::min;
 use std::fmt::{Display, Formatter};
-
+use prost::Message;
 use {
     crate::{
         banking_trace::BankingPacketSender,
@@ -55,6 +56,7 @@ use solana_sdk::transaction::VersionedTransaction;
 
 const CONNECTION_TIMEOUT_S: u64 = 10;
 const CONNECTION_BACKOFF_S: u64 = 5;
+
 
 #[derive(Default)]
 struct BlockEngineStageStats {
@@ -131,7 +133,9 @@ impl BlockEngineStage {
         exit: Arc<AtomicBool>,
         block_builder_fee_info: &Arc<Mutex<BlockBuilderFeeInfo>>,
         vhook_bundles: crossbeam_channel::Receiver<HookedBundle>,
-        vhook_auth_code: String
+        vhook_auth_code: String,
+        captured_bundle_bd: tokio::sync::broadcast::Sender<Vec<PacketBundle>>,
+        captured_bd_send_delay: Duration
     ) -> Self {
         let block_builder_fee_info = block_builder_fee_info.clone();
 
@@ -192,6 +196,8 @@ impl BlockEngineStage {
                     banking_packet_sender,
                     exit,
                     block_builder_fee_info,
+                    captured_bundle_bd,
+                    captured_bd_send_delay
                 ));
             })
             .unwrap();
@@ -217,6 +223,8 @@ impl BlockEngineStage {
         banking_packet_sender: BankingPacketSender,
         exit: Arc<AtomicBool>,
         block_builder_fee_info: Arc<Mutex<BlockBuilderFeeInfo>>,
+        captured_bundle_bd: tokio::sync::broadcast::Sender<Vec<PacketBundle>>,
+        captured_bd_send_delay: Duration
     ) {
         const CONNECTION_TIMEOUT: Duration = Duration::from_secs(CONNECTION_TIMEOUT_S);
         const CONNECTION_BACKOFF: Duration = Duration::from_secs(CONNECTION_BACKOFF_S);
@@ -243,6 +251,8 @@ impl BlockEngineStage {
                 &exit,
                 &block_builder_fee_info,
                 &CONNECTION_TIMEOUT,
+                &captured_bundle_bd,
+                captured_bd_send_delay
             )
             .await
             {
@@ -276,6 +286,8 @@ impl BlockEngineStage {
         exit: &Arc<AtomicBool>,
         block_builder_fee_info: &Arc<Mutex<BlockBuilderFeeInfo>>,
         connection_timeout: &Duration,
+        captured_bundle_bd: &tokio::sync::broadcast::Sender<Vec<PacketBundle>>,
+        captured_bd_send_delay: Duration
     ) -> crate::proxy::Result<()> {
         // Get a copy of configs here in case they have changed at runtime
         let keypair = cluster_info.keypair().clone();
@@ -357,6 +369,8 @@ impl BlockEngineStage {
             connection_timeout,
             keypair,
             cluster_info,
+            captured_bundle_bd,
+            captured_bd_send_delay
         )
         .await
     }
@@ -377,6 +391,8 @@ impl BlockEngineStage {
         connection_timeout: &Duration,
         keypair: Arc<Keypair>,
         cluster_info: &Arc<ClusterInfo>,
+        captured_bundle_bd: &tokio::sync::broadcast::Sender<Vec<PacketBundle>>,
+        captured_bd_send_delay: Duration
     ) -> crate::proxy::Result<()> {
         let subscribe_packets_stream = timeout(
             *connection_timeout,
@@ -434,6 +450,8 @@ impl BlockEngineStage {
             keypair,
             cluster_info,
             connection_timeout,
+            captured_bundle_bd,
+            captured_bd_send_delay
         )
         .await
     }
@@ -458,6 +476,8 @@ impl BlockEngineStage {
         keypair: Arc<Keypair>,
         cluster_info: &Arc<ClusterInfo>,
         connection_timeout: &Duration,
+        captured_bundle_bd: &tokio::sync::broadcast::Sender<Vec<PacketBundle>>,
+        captured_bd_send_delay: Duration
     ) -> crate::proxy::Result<()> {
         const METRICS_TICK: Duration = Duration::from_secs(1);
         const MAINTENANCE_TICK: Duration = Duration::from_secs(10 * 60);
@@ -478,7 +498,7 @@ impl BlockEngineStage {
                     Self::handle_block_engine_packets(resp, packet_tx, banking_packet_sender, local_config.trust_packets, &mut block_engine_stats)?;
                 }
                 maybe_bundles = bundle_stream.message() => {
-                    Self::handle_block_engine_maybe_bundles(maybe_bundles, bundle_tx, &mut block_engine_stats)?;
+                    Self::handle_block_engine_maybe_bundles(maybe_bundles, bundle_tx, &mut block_engine_stats, captured_bundle_bd, captured_bd_send_delay)?;
                 }
                 _ = metrics_and_auth_tick.tick() => {
                     block_engine_stats.report();
@@ -557,6 +577,8 @@ impl BlockEngineStage {
         maybe_bundles_response: Result<Option<block_engine::SubscribeBundlesResponse>, Status>,
         bundle_sender: &Sender<Vec<PacketBundle>>,
         block_engine_stats: &mut BlockEngineStageStats,
+        captured_bundle_bd: &tokio::sync::broadcast::Sender<Vec<PacketBundle>>,
+        captured_bd_send_delay: Duration
     ) -> crate::proxy::Result<()> {
         let bundles_response = maybe_bundles_response?.ok_or(ProxyError::GrpcStreamDisconnected)?;
         let bundles: Vec<PacketBundle> = bundles_response
@@ -583,10 +605,19 @@ impl BlockEngineStage {
             bundles.iter().map(|bundle| bundle.batch.len() as u64).sum()
         );
 
+        // send captured bundle straight away
+        let _ = captured_bundle_bd.send(bundles.clone());
+
+        // delay normal bundle send by CAPTURED_BD_SEND_DELAY_MS
         // NOTE: bundles are sanitized in bundle_sanitizer module
-        bundle_sender
-            .send(bundles)
-            .map_err(|_| ProxyError::PacketForwardError)
+        let bundle_sender_clone = bundle_sender.clone();
+        tokio::spawn(async move {
+            // sleeping here is ok because we're in tokio context
+            tokio::time::sleep(captured_bd_send_delay).await;
+            let _ = bundle_sender_clone.send(bundles);
+        });
+
+        Ok(())
     }
 
     fn handle_block_engine_packets(
