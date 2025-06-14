@@ -6819,11 +6819,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "solana-sdk",
-<<<<<<< .mine
  "solana-transaction-context 2.2.16",
-=======
- "solana-transaction-context 2.2.14",
->>>>>>> .theirs
  "tarpc",
 ]
 
@@ -6850,11 +6846,7 @@ dependencies = [
 
 [[package]]
 name = "solana-bench-streamer"
-<<<<<<< .mine
 version = "2.2.16"
-=======
-version = "2.2.14"
->>>>>>> .theirs
 dependencies = [
  "clap 3.2.25",
  "crossbeam-channel",
@@ -7102,11 +7094,7 @@ dependencies = [
 
 [[package]]
 name = "solana-builtins"
-<<<<<<< .mine
 version = "2.2.16"
-=======
-version = "2.2.14"
->>>>>>> .theirs
 dependencies = [
  "agave-feature-set",
  "solana-address-lookup-table-program",
@@ -7282,11 +7270,7 @@ dependencies = [
 
 [[package]]
 name = "solana-cli"
-<<<<<<< .mine
 version = "2.2.16"
-=======
-version = "2.2.14"
->>>>>>> .theirs
 dependencies = [
  "agave-feature-set",
  "assert_matches",
@@ -7381,11 +7365,7 @@ dependencies = [
 
 [[package]]
 name = "solana-cli-config"
-<<<<<<< .mine
 version = "2.2.16"
-=======
-version = "2.2.14"
->>>>>>> .theirs
 dependencies = [
  "anyhow",
  "dirs-next",
@@ -8320,11 +8300,7 @@ dependencies = [
 
 [[package]]
 name = "solana-genesis-utils"
-<<<<<<< .mine
 version = "2.2.16"
-=======
-version = "2.2.14"
->>>>>>> .theirs
 dependencies = [
  "log",
  "solana-accounts-db",
@@ -8821,11 +8797,7 @@ dependencies = [
 
 [[package]]
 name = "solana-log-analyzer"
-<<<<<<< .mine
 version = "2.2.16"
-=======
-version = "2.2.14"
->>>>>>> .theirs
 dependencies = [
  "byte-unit",
  "clap 3.2.25",
@@ -10627,11 +10599,7 @@ dependencies = [
 
 [[package]]
 name = "solana-svm-transaction"
-<<<<<<< .mine
 version = "2.2.16"
-=======
-version = "2.2.14"
->>>>>>> .theirs
 dependencies = [
  "solana-hash",
  "solana-message",
@@ -10662,11 +10630,7 @@ dependencies = [
 
 [[package]]
 name = "solana-system-program"
-<<<<<<< .mine
 version = "2.2.16"
-=======
-version = "2.2.14"
->>>>>>> .theirs
 dependencies = [
  "agave-feature-set",
  "assert_matches",
@@ -11084,11 +11048,7 @@ dependencies = [
 
 [[package]]
 name = "solana-transaction-dos"
-<<<<<<< .mine
 version = "2.2.16"
-=======
-version = "2.2.14"
->>>>>>> .theirs
 dependencies = [
  "bincode",
  "clap 2.34.0",
