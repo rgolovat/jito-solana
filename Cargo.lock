@@ -6871,7 +6871,7 @@ dependencies = [
  "solana-slot-history",
  "solana-stake-interface",
  "solana-sysvar",
- "solana-vote-interface",
+ "solana-vote-interface 2.2.5",
  "spl-generic-token",
  "spl-pod",
  "spl-token",
@@ -8847,7 +8847,7 @@ dependencies = [
  "solana-transaction",
  "solana-version",
  "solana-vote",
- "solana-vote-interface",
+ "solana-vote-interface 2.2.5",
  "solana-vote-program",
  "static_assertions",
  "test-case",
@@ -9266,7 +9266,7 @@ dependencies = [
  "solana-turbine",
  "solana-validator-exit",
  "solana-vote",
- "solana-vote-interface",
+ "solana-vote-interface 2.2.5",
  "solana-vote-program",
  "static_assertions",
  "strum",
@@ -9715,7 +9715,7 @@ dependencies = [
  "solana-system-interface",
  "solana-sysvar",
  "solana-sysvar-id",
- "solana-vote-interface",
+ "solana-vote-interface 2.2.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "thiserror 2.0.12",
  "wasm-bindgen",
 ]
@@ -10162,7 +10162,7 @@ dependencies = [
  "solana-validator-exit",
  "solana-version",
  "solana-vote",
- "solana-vote-interface",
+ "solana-vote-interface 2.2.5",
  "solana-vote-program",
  "spl-generic-token",
  "spl-pod",
@@ -10218,7 +10218,7 @@ dependencies = [
  "solana-transaction-error",
  "solana-transaction-status-client-types",
  "solana-version",
- "solana-vote-interface",
+ "solana-vote-interface 2.2.5",
  "static_assertions",
  "tokio",
 ]
@@ -10473,7 +10473,7 @@ dependencies = [
  "solana-unified-scheduler-logic",
  "solana-version",
  "solana-vote",
- "solana-vote-interface",
+ "solana-vote-interface 2.2.5",
  "solana-vote-program",
  "spl-generic-token",
  "static_assertions",
@@ -10532,7 +10532,7 @@ dependencies = [
  "solana-system-transaction",
  "solana-transaction",
  "solana-transaction-error",
- "solana-vote-interface",
+ "solana-vote-interface 2.2.5",
  "thiserror 2.0.12",
 ]
 
@@ -10899,7 +10899,7 @@ dependencies = [
  "solana-sysvar-id",
  "solana-transaction-context",
  "solana-type-overrides",
- "solana-vote-interface",
+ "solana-vote-interface 2.2.5",
  "solana-vote-program",
  "test-case",
 ]
@@ -11671,7 +11671,7 @@ dependencies = [
  "solana-transaction",
  "solana-transaction-error",
  "solana-transaction-status-client-types",
- "solana-vote-interface",
+ "solana-vote-interface 2.2.5",
  "spl-associated-token-account",
  "spl-memo",
  "spl-token",
@@ -11949,9 +11949,38 @@ dependencies = [
  "solana-signer",
  "solana-svm-transaction",
  "solana-transaction",
- "solana-vote-interface",
+ "solana-vote-interface 2.2.5",
  "static_assertions",
  "thiserror 2.0.12",
+]
+
+[[package]]
+name = "solana-vote-interface"
+version = "2.2.5"
+dependencies = [
+ "arbitrary",
+ "bincode",
+ "itertools 0.12.1",
+ "num-derive",
+ "num-traits",
+ "rand 0.8.5",
+ "serde",
+ "serde_derive",
+ "solana-clock",
+ "solana-decode-error",
+ "solana-epoch-schedule",
+ "solana-frozen-abi",
+ "solana-frozen-abi-macro",
+ "solana-hash",
+ "solana-instruction",
+ "solana-logger",
+ "solana-pubkey",
+ "solana-rent",
+ "solana-sdk-ids",
+ "solana-serde-varint",
+ "solana-serialize-utils",
+ "solana-short-vec",
+ "solana-system-interface",
 ]
 
 [[package]]
@@ -11960,7 +11989,6 @@ version = "2.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ef4f08746f154458f28b98330c0d55cb431e2de64ee4b8efc98dcbe292e0672b"
 dependencies = [
- "arbitrary",
  "bincode",
  "num-derive",
  "num-traits",
@@ -11968,8 +11996,6 @@ dependencies = [
  "serde_derive",
  "solana-clock",
  "solana-decode-error",
- "solana-frozen-abi",
- "solana-frozen-abi-macro",
  "solana-hash",
  "solana-instruction",
  "solana-pubkey",
@@ -12016,7 +12042,7 @@ dependencies = [
  "solana-slot-hashes",
  "solana-transaction",
  "solana-transaction-context",
- "solana-vote-interface",
+ "solana-vote-interface 2.2.5",
  "test-case",
  "thiserror 2.0.12",
 ]
@@ -12052,7 +12078,7 @@ dependencies = [
  "solana-time-utils",
  "solana-timings",
  "solana-vote",
- "solana-vote-interface",
+ "solana-vote-interface 2.2.5",
  "solana-vote-program",
  "tempfile",
 ]
