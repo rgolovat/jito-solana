@@ -568,7 +568,7 @@ solana-unified-scheduler-pool = { path = "unified-scheduler-pool", version = "=2
 solana-validator-exit = "2.2.1"
 solana-version = { path = "version", version = "=2.3.10" }
 solana-vote = { path = "vote", version = "=2.3.10" }
-solana-vote-interface = "2.2.5"
+solana-vote-interface =  { path = "vote-interface", version = "2.2.5" }
 solana-vote-program = { path = "programs/vote", version = "=2.3.10", default-features = false }
 solana-wen-restart = { path = "wen-restart", version = "=2.3.10" }
 solana-zk-elgamal-proof-program = { path = "programs/zk-elgamal-proof", version = "=2.3.10" }
