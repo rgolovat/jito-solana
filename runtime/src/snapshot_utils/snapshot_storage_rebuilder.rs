@@ -172,20 +172,19 @@ impl SnapshotStorageRebuilder {
     ) {
         thread_pool.spawn(move || {
             for path in rebuilder.file_receiver.iter() {
-                match rebuilder.process_append_vec_file(path) {
-                    Ok(_) => {}
-                    Err(err) => {
-                        exit_sender
-                            .send(Err(err))
-                            .expect("sender should be connected");
+            match rebuilder.process_append_vec_file(path) {
+                Ok(_) => {}
+                Err(err) => {
+                        warn!("snapshot storage rebuilder worker encountered error: {err}");
+                        if exit_sender.send(Err(err)).is_err() {
+                            return;
+                        }
                         return;
                     }
                 }
             }
 
-            exit_sender
-                .send(Ok(()))
-                .expect("sender should be connected");
+            let _ = exit_sender.send(Ok(()));
         })
     }
 
