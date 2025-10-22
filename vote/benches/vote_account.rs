@@ -25,7 +25,7 @@ fn new_rand_vote_account<R: Rng>(
         unix_timestamp: rng.gen(),
     };
     let mut vote_state = VoteStateV3::new(&vote_init, &clock);
-    vote_state.process_next_vote_slot(0, 0, 1);
+    vote_state.process_next_vote_slot(0, 0, 1, true);
     let account = AccountSharedData::new_data(
         rng.gen(), // lamports
         &VoteStateVersions::new_v3(vote_state.clone()),

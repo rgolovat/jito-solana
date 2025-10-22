@@ -50,7 +50,7 @@ fn create_accounts() -> (Slot, SlotHashes, Vec<TransactionAccount>, Vec<AccountM
         );
 
         for next_vote_slot in 0..num_initial_votes {
-            vote_state.process_next_vote_slot(next_vote_slot, 0, 0);
+            vote_state.process_next_vote_slot(next_vote_slot, 0, 0, true);
         }
         let mut vote_account_data: Vec<u8> = vec![0; VoteStateV3::size_of()];
         let versioned = VoteStateVersions::new_v3(vote_state);

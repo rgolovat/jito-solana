@@ -345,7 +345,7 @@ mod tests {
 
         let root = ancestors[2];
         vote_state.root_slot = Some(root);
-        vote_state.process_next_vote_slot(*ancestors.last().unwrap());
+        vote_state.process_next_vote_slot(*ancestors.last().unwrap(), true);
         AggregateCommitmentService::aggregate_commitment_for_vote_account(
             &mut commitment,
             &mut rooted_stake,
@@ -377,8 +377,8 @@ mod tests {
         let root = ancestors[2];
         vote_state.root_slot = Some(root);
         assert!(ancestors[4] + 2 >= ancestors[6]);
-        vote_state.process_next_vote_slot(ancestors[4]);
-        vote_state.process_next_vote_slot(ancestors[6]);
+        vote_state.process_next_vote_slot(ancestors[4], true);
+        vote_state.process_next_vote_slot(ancestors[6], true);
         AggregateCommitmentService::aggregate_commitment_for_vote_account(
             &mut commitment,
             &mut rooted_stake,
